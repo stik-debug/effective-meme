@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ chama.name }} - Chama App{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+                <li class="breadcrumb-item active">{{ chama.name }}</li>
+            </ol>
+        </nav>
+        <h4 class="mb-0">{{ chama.name }}</h4>
+        <small class="text-muted">{{ membership.role_in_chama|title }}</small>
+    </div>
+    {% if is_admin %}
+    <span class="badge bg-warning text-dark">Admin</span>
+    {% endif %}
+</div>
+
+<!-- Balance Card -->
+<div class="card border-0 bg-primary text-white shadow mb-4">
+    <div class="card-body text-center py-4">
+        <small class="opacity-75">Group Balance</small>
+        <h2 class="mb-0">KES {{ "{:,.0f}".format(group_balance) }}</h2>
+        <small class="opacity-75">Your Savings: KES {{ "{:,.0f}".format(membership.total_savings) }}</small>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row g-2 mb-4">
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('contributions', chama_id=chama.id) }}" class="btn btn-outline-primary w-100 py-3">
+            <i class="bi bi-cash-stack d-block fs-4"></i>
+            <small>Contributions</small>
+        </a>
+    </div>
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('loans', chama_id=chama.id) }}" class="btn btn-outline-danger w-100 py-3">
+            <i class="bi bi-bank d-block fs-4"></i>
+            <small>Loans</small>
+        </a>
+    </div>
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('merry_go_round', chama_id=chama.id) }}" class="btn btn-outline-warning w-100 py-3">
+            <i class="bi bi-arrow-repeat d-block fs-4"></i>
+            <small>MGR</small>
+        </a>
+    </div>
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('chama_members', chama_id=chama.id) }}" class="btn btn-outline-success w-100 py-3">
+            <i class="bi bi-people d-block fs-4"></i>
+            <small>Members</small>
+        </a>
+    </div>
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('meetings', chama_id=chama.id) }}" class="btn btn-outline-info w-100 py-3">
+            <i class="bi bi-calendar-event d-block fs-4"></i>
+            <small>Meetings</small>
+        </a>
+    </div>
+    <div class="col-4 col-md-2">
+        <a href="{{ url_for('reports', chama_id=chama.id) }}" class="btn btn-outline-secondary w-100 py-3">
+            <i class="bi bi-graph-up d-block fs-4"></i>
+            <small>Reports</small>
+        </a>
+    </div>
+</div>
+
+<!-- Info -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-info-circle"></i> Chama Info</h6>
+                <p class="small text-muted mb-2">{{ chama.description or 'No description' }}</p>
+                <ul class="list-unstyled small mb-0">
+                    <li><strong>Contribution:</strong> KES {{ "{:,.0f}".format(chama.contribution_amount) }} by day {{ chama.contribution_day }}</li>
+                    <li><strong>Loan Interest:</strong> {{ chama.loan_interest_rate }}%</li>
+                    <li><strong>Max Loan:</strong> {{ chama.max_loan_multiplier }}x your savings</li>
+                    <li><strong>Members:</strong> {{ members|length }}</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-people"></i> Members ({{ members|length }})</h6>
+                <div class="d-flex flex-wrap gap-1">
+                    {% for m in members[:8] %}
+                    <span class="badge bg-light text-dark border">{{ m.user.name.split()[0] }}</span>
+                    {% endfor %}
+                    {% if members|length > 8 %}
+                    <span class="badge bg-secondary">+{{ members|length - 8 }} more</span>
+                    {% endif %}
+                </div>
+                <a href="{{ url_for('chama_members', chama_id=chama.id) }}" class="btn btn-sm btn-link mt-2 p-0">View all →</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Contributions -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-clock-history"></i> Recent Contributions</h6>
+        <a href="{{ url_for('contributions', chama_id=chama.id) }}" class="btn btn-sm btn-outline-primary">View All</a>
+    </div>
+    <div class="card-body p-0">
+        {% if recent_contribs %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Member</th>
+                        <th>Amount</th>
+                        <th>Date</th>
+                        <th>Method</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in recent_contribs %}
+                    <tr>
+                        <td>{{ c.user.name }}</td>
+                        <td class="text-success fw-bold">KES {{ "{:,.0f}".format(c.amount) }}</td>
+                        <td>{{ c.contribution_date.strftime('%d %b %Y') }}</td>
+                        <td><span class="badge bg-light text-dark">{{ c.payment_method }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4 mb-0">No contributions yet</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Active Loans -->
+{% if active_loans %}
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-bank"></i> Active / Pending Loans</h6>
+        <a href="{{ url_for('loans', chama_id=chama.id) }}" class="btn btn-sm btn-outline-danger">View All</a>
+    </div>
+    <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+            {% for loan in active_loans %}
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <strong>{{ loan.user.name }}</strong>
+                        <br><small class="text-muted">{{ loan.purpose or 'No purpose stated' }}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge {% if loan.status == 'pending' %}bg-warning text-dark{% elif loan.status == 'active' %}bg-danger{% else %}bg-success{% endif %}">
+                            {{ loan.status|title }}
+                        </span>
+                        <br><strong>KES {{ "{:,.0f}".format(loan.amount) }}</strong>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

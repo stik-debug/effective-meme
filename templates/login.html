@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Login - Chama App{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow border-0">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <i class="bi bi-people-fill text-primary fs-1"></i>
+                    <h4 class="mt-2">Welcome Back</h4>
+                    <p class="text-muted small">Login to your Chama account</p>
+                </div>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-phone"></i></span>
+                            <input type="tel" name="phone" class="form-control" placeholder="07XXXXXXXX" required autofocus>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                            <input type="password" name="password" class="form-control" placeholder="Enter password" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 py-2">
+                        <i class="bi bi-box-arrow-in-right"></i> Login
+                    </button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <small class="text-muted">Don't have an account? <a href="{{ url_for('register') }}">Register</a></small>
+                </div>
+                
+                <hr>
+                <div class="text-center">
+                    <small class="text-muted">Demo: 0712345678 / password123</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

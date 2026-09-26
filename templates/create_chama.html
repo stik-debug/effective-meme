@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Create Chama - Chama App{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow border-0">
+            <div class="card-body p-4">
+                <h4 class="mb-4"><i class="bi bi-plus-circle text-primary"></i> Create New Chama</h4>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Chama Name *</label>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. Umoja Women Chama" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" class="form-control" rows="3" placeholder="Brief description of the group..."></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Monthly Contribution (KES) *</label>
+                            <input type="number" name="contribution_amount" class="form-control" value="2000" min="100" step="100" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Contribution Day of Month</label>
+                            <input type="number" name="contribution_day" class="form-control" value="5" min="1" max="28">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="form-label">Loan Interest Rate (% per period)</label>
+                        <input type="number" name="loan_interest_rate" class="form-control" value="5" min="0" max="30" step="0.5">
+                        <small class="text-muted">Common rates in Kenya: 5% - 10% per month</small>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check-lg"></i> Create Chama
+                        </button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

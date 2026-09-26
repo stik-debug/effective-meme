@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Register - Chama App{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow border-0">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <i class="bi bi-person-plus text-primary fs-1"></i>
+                    <h4 class="mt-2">Create Account</h4>
+                    <p class="text-muted small">Join or create your Chama</p>
+                </div>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="Jane Wanjiku" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number</label>
+                        <input type="tel" name="phone" class="form-control" placeholder="07XXXXXXXX" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" name="password" class="form-control" placeholder="Min 6 characters" required minlength="6">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confirm Password</label>
+                        <input type="password" name="confirm_password" class="form-control" placeholder="Repeat password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 py-2">
+                        <i class="bi bi-check-circle"></i> Register
+                    </button>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <small class="text-muted">Already have an account? <a href="{{ url_for('login') }}">Login</a></small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

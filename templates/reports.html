@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Reports - {{ chama.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('chama_detail', chama_id=chama.id) }}">{{ chama.name }}</a></li>
+        <li class="breadcrumb-item active">Reports</li>
+    </ol>
+</nav>
+
+<h4 class="mb-4"><i class="bi bi-graph-up"></i> Reports & Statements</h4>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-4">
+        <div class="card border-0 shadow-sm bg-primary text-white text-center">
+            <div class="card-body py-3">
+                <small>Group Balance</small>
+                <h4 class="mb-0">KES {{ "{:,.0f}".format(group_balance) }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4">
+        <div class="card border-0 shadow-sm bg-success text-white text-center">
+            <div class="card-body py-3">
+                <small>Total Contributions</small>
+                <h4 class="mb-0">KES {{ "{:,.0f}".format(total_contributions) }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="card border-0 shadow-sm bg-info text-white text-center">
+            <div class="card-body py-3">
+                <small>Active Members</small>
+                <h4 class="mb-0">{{ statements|length }}</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Member Statements -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white">
+        <h6 class="mb-0">Member Statements</h6>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th>Total Saved</th>
+                    <th>Loaned</th>
+                    <th>Repaid</th>
+                    <th>Outstanding</th>
+                    <th>Net Position</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in statements %}
+                <tr>
+                    <td><strong>{{ s.member.user.name }}</strong></td>
+                    <td><span class="badge bg-secondary">{{ s.member.role_in_chama|title }}</span></td>
+                    <td class="text-success">KES {{ "{:,.0f}".format(s.savings) }}</td>
+                    <td>KES {{ "{:,.0f}".format(s.total_loaned) }}</td>
+                    <td class="text-success">KES {{ "{:,.0f}".format(s.total_repaid) }}</td>
+                    <td class="{% if s.outstanding > 0 %}text-danger{% else %}text-success{% endif %}">
+                        KES {{ "{:,.0f}".format(s.outstanding) }}
+                    </td>
+                    <td class="fw-bold">
+                        KES {{ "{:,.0f}".format(s.savings - s.outstanding) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="mt-4 text-center">
+    <button onclick="window.print()" class="btn btn-outline-primary">
+        <i class="bi bi-printer"></i> Print Report
+    </button>
+</div>
+{% endblock %}
