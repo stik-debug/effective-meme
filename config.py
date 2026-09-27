@@ -7,13 +7,16 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'chama-kenya-dev-secret-change-in-production')
     
     # Database
+     # Database
     database_url = os.environ.get('DATABASE_URL')
-    if database_url and database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    if database_url:
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql+psycopg2://', 1)
+        elif database_url.startswith('postgresql://') and '+psycopg' not in database_url:
+            database_url = database_url.replace('postgresql://', 'postgresql+psycopg2://', 1)
     
     SQLALCHEMY_DATABASE_URI = database_url or 'sqlite:///chama.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    
     # M-Pesa Daraja
     MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', '')
     MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', '')
