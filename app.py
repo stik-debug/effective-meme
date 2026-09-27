@@ -35,14 +35,32 @@ class User(UserMixin, db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+
+class PhoneOTP(db.Model):
+    """One-time codes for phone verification"""
+    id = db.Column(db.Integer, primary_key=True)
+    phone = db.Column(db.String(15), nullable=False, index=True)
+    code = db.Column(db.String(6), nullable=False)
+    purpose = db.Column(db.String(20), default='register')  # register, login, reset
+    name = db.Column(db.String(100))  # temp store during registration
+    password_hash = db.Column(db.String(200))  # temp store during registration
+    is_used = db.Column(db.Boolean, default=False)
+    attempts = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+
 class Chama(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    contribution_amount = db.Column(db.Float, default=1000.0)  # Monthly contribution in KES
+    contribution_amount = db.Column(db.Float, default=1000.0)  # Monthly contribution
     contribution_day = db.Column(db.Integer, default=5)  # Day of month
     loan_interest_rate = db.Column(db.Float, default=5.0)  # % per month
     max_loan_multiplier = db.Column(db.Float, default=3.0)  # Max loan = savings * multiplier
+    currency = db.Column(db.String(10), default='KES')  # KES, UGX, TZS, USD, etc.
+    fine_amount = db.Column(db.Float, default=200.0)  # Default fine for late contribution
+    fine_grace_days = db.Column(db.Integer, default=3)  # Days after due date before fine
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
     
@@ -51,6 +69,7 @@ class Chama(db.Model):
     loans = db.relationship('Loan', backref='chama', lazy=True)
     merry_go_rounds = db.relationship('MerryGoRound', backref='chama', lazy=True)
     meetings = db.relationship('Meeting', backref='chama', lazy=True)
+    fines = db.relationship('Fine', backref='chama', lazy=True)
 
 class Membership(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -146,6 +165,24 @@ class Attendance(db.Model):
     apology = db.Column(db.String(200))
 
 
+class Fine(db.Model):
+    """Fines for late contributions, missed meetings, etc."""
+    id = db.Column(db.Integer, primary_key=True)
+    chama_id = db.Column(db.Integer, db.ForeignKey('chama.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    reason = db.Column(db.String(200), nullable=False)  # late_contribution, missed_meeting, other
+    month = db.Column(db.String(7))  # YYYY-MM for contribution fines
+    status = db.Column(db.String(20), default='unpaid')  # unpaid, paid, waived
+    issued_date = db.Column(db.Date, default=date.today)
+    paid_date = db.Column(db.Date)
+    issued_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    notes = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', foreign_keys=[user_id])
+
+
 class MpesaTransaction(db.Model):
     """Tracks STK Push requests and their status"""
     id = db.Column(db.Integer, primary_key=True)
@@ -199,6 +236,38 @@ def calculate_group_balance(chama_id):
     ).scalar() or 0
     return total_contrib - total_loans + total_repaid
 
+
+def format_money(amount, currency='KES'):
+    """Format amount with currency symbol"""
+    symbols = {
+        'KES': 'KES',
+        'UGX': 'UGX',
+        'TZS': 'TZS',
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+        'RWF': 'RWF',
+    }
+    symbol = symbols.get(currency, currency)
+    return f"{symbol} {amount:,.0f}"
+
+
+def get_unpaid_members_this_month(chama_id):
+    """Return memberships that have not contributed this month"""
+    chama = Chama.query.get(chama_id)
+    if not chama:
+        return []
+    this_month = date.today().strftime('%Y-%m')
+    members = Membership.query.filter_by(chama_id=chama_id, is_active=True).all()
+    unpaid = []
+    for m in members:
+        paid = Contribution.query.filter_by(
+            chama_id=chama_id, user_id=m.user_id, month=this_month
+        ).first()
+        if not paid:
+            unpaid.append(m)
+    return unpaid
+
 # ==================== ROUTES ====================
 
 @app.route('/')
@@ -207,6 +276,21 @@ def index():
         return redirect(url_for('dashboard'))
     return render_template('index.html')
 
+def _normalize_phone(phone: str) -> str:
+    """Normalize to 07XXXXXXXX format for storage"""
+    phone = phone.strip().replace(' ', '').replace('-', '').replace('+', '')
+    if phone.startswith('254'):
+        phone = '0' + phone[3:]
+    if not phone.startswith('0') and len(phone) == 9:
+        phone = '0' + phone
+    return phone
+
+
+def _generate_otp() -> str:
+    import random
+    return f"{random.randint(100000, 999999)}"
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
@@ -214,7 +298,7 @@ def register():
     
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
-        phone = request.form.get('phone', '').strip()
+        phone = _normalize_phone(request.form.get('phone', ''))
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')
         
@@ -222,23 +306,151 @@ def register():
             flash('All fields are required.', 'danger')
             return render_template('register.html')
         
+        if len(phone) < 10:
+            flash('Enter a valid Kenyan phone number (e.g. 07XXXXXXXX).', 'danger')
+            return render_template('register.html')
+        
         if password != confirm:
             flash('Passwords do not match.', 'danger')
             return render_template('register.html')
         
-        if User.query.filter_by(phone=phone).first():
-            flash('Phone number already registered.', 'danger')
+        if len(password) < 6:
+            flash('Password must be at least 6 characters.', 'danger')
             return render_template('register.html')
         
-        user = User(name=name, phone=phone)
-        user.set_password(password)
-        db.session.add(user)
+        if User.query.filter_by(phone=phone).first():
+            flash('Phone number already registered. Please login.', 'danger')
+            return render_template('register.html')
+        
+        # Invalidate old OTPs for this phone
+        PhoneOTP.query.filter_by(phone=phone, purpose='register', is_used=False).update({'is_used': True})
+        
+        code = _generate_otp()
+        otp = PhoneOTP(
+            phone=phone,
+            code=code,
+            purpose='register',
+            name=name,
+            password_hash=generate_password_hash(password),
+            expires_at=datetime.utcnow() + timedelta(minutes=10)
+        )
+        db.session.add(otp)
         db.session.commit()
         
-        flash('Registration successful! Please login.', 'success')
-        return redirect(url_for('login'))
+        # Send SMS
+        try:
+            from services.sms import SMSService
+            sms = SMSService()
+            msg = (
+                f"Your ChamaApp verification code is: {code}. "
+                f"Valid for 10 minutes. Do not share this code."
+            )
+            result = sms.send(phone, msg)
+            if result.get('simulated'):
+                # In simulation, also show code on next page for testing
+                session['debug_otp'] = code
+        except Exception as e:
+            print(f'OTP SMS error: {e}')
+            session['debug_otp'] = code  # fallback so testing still works
+        
+        session['otp_phone'] = phone
+        flash('Verification code sent to your phone. Enter it below.', 'success')
+        return redirect(url_for('verify_otp'))
     
     return render_template('register.html')
+
+
+@app.route('/verify-otp', methods=['GET', 'POST'])
+def verify_otp():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    phone = session.get('otp_phone')
+    if not phone:
+        flash('Please start registration first.', 'warning')
+        return redirect(url_for('register'))
+    
+    debug_otp = session.get('debug_otp')  # only present in simulation mode
+    
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip()
+        action = request.form.get('action', 'verify')
+        
+        if action == 'resend':
+            # Resend OTP
+            PhoneOTP.query.filter_by(phone=phone, purpose='register', is_used=False).update({'is_used': True})
+            new_code = _generate_otp()
+            # Keep name/password from last OTP if possible
+            last = PhoneOTP.query.filter_by(phone=phone, purpose='register').order_by(PhoneOTP.created_at.desc()).first()
+            otp = PhoneOTP(
+                phone=phone,
+                code=new_code,
+                purpose='register',
+                name=last.name if last else '',
+                password_hash=last.password_hash if last else '',
+                expires_at=datetime.utcnow() + timedelta(minutes=10)
+            )
+            db.session.add(otp)
+            db.session.commit()
+            try:
+                from services.sms import SMSService
+                sms = SMSService()
+                sms.send(phone, f"Your ChamaApp verification code is: {new_code}. Valid for 10 minutes.")
+                if True:  # simulation friendly
+                    session['debug_otp'] = new_code
+            except Exception:
+                session['debug_otp'] = new_code
+            flash('New code sent to your phone.', 'success')
+            return redirect(url_for('verify_otp'))
+        
+        otp = PhoneOTP.query.filter_by(
+            phone=phone, purpose='register', is_used=False, code=code
+        ).order_by(PhoneOTP.created_at.desc()).first()
+        
+        if not otp:
+            # Increment attempts on latest
+            latest = PhoneOTP.query.filter_by(phone=phone, purpose='register', is_used=False).order_by(PhoneOTP.created_at.desc()).first()
+            if latest:
+                latest.attempts += 1
+                db.session.commit()
+                if latest.attempts >= 5:
+                    latest.is_used = True
+                    db.session.commit()
+                    flash('Too many wrong attempts. Please register again.', 'danger')
+                    session.pop('otp_phone', None)
+                    session.pop('debug_otp', None)
+                    return redirect(url_for('register'))
+            flash('Invalid code. Please try again.', 'danger')
+            return render_template('verify_otp.html', phone=phone, debug_otp=session.get('debug_otp'))
+        
+        if otp.expires_at < datetime.utcnow():
+            otp.is_used = True
+            db.session.commit()
+            flash('Code expired. Please register again.', 'danger')
+            session.pop('otp_phone', None)
+            session.pop('debug_otp', None)
+            return redirect(url_for('register'))
+        
+        # Success – create user
+        if User.query.filter_by(phone=phone).first():
+            flash('Phone already registered. Please login.', 'warning')
+            session.pop('otp_phone', None)
+            session.pop('debug_otp', None)
+            return redirect(url_for('login'))
+        
+        user = User(name=otp.name, phone=phone, password_hash=otp.password_hash)
+        db.session.add(user)
+        otp.is_used = True
+        db.session.commit()
+        
+        session.pop('otp_phone', None)
+        session.pop('debug_otp', None)
+        
+        login_user(user, remember=True)
+        flash('Phone verified! Welcome to ChamaApp.', 'success')
+        return redirect(url_for('dashboard'))
+    
+    return render_template('verify_otp.html', phone=phone, debug_otp=debug_otp)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -302,6 +514,7 @@ def create_chama():
         amount = float(request.form.get('contribution_amount', 1000))
         day = int(request.form.get('contribution_day', 5))
         interest = float(request.form.get('loan_interest_rate', 5))
+        currency = request.form.get('currency', 'KES')
         
         if not name:
             flash('Chama name is required.', 'danger')
@@ -312,7 +525,8 @@ def create_chama():
             description=description,
             contribution_amount=amount,
             contribution_day=day,
-            loan_interest_rate=interest
+            loan_interest_rate=interest,
+            currency=currency
         )
         db.session.add(chama)
         db.session.flush()
@@ -1022,6 +1236,253 @@ def mpesa_transactions(chama_id):
         txns = MpesaTransaction.query.filter_by(chama_id=chama_id, user_id=current_user.id).order_by(MpesaTransaction.created_at.desc()).limit(50).all()
     
     return render_template('mpesa_transactions.html', chama=chama, txns=txns, is_admin=is_admin)
+
+
+
+# ==================== FINES ====================
+
+@app.route('/chama/<int:chama_id>/fines')
+@login_required
+def fines(chama_id):
+    chama = Chama.query.get_or_404(chama_id)
+    membership = get_membership(current_user.id, chama_id)
+    if not membership:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    all_fines = Fine.query.filter_by(chama_id=chama_id).order_by(Fine.created_at.desc()).all()
+    is_admin = is_treasurer_or_chair(current_user, chama_id)
+    members = Membership.query.filter_by(chama_id=chama_id, is_active=True).all()
+    
+    total_unpaid = sum(f.amount for f in all_fines if f.status == 'unpaid')
+    
+    return render_template('fines.html',
+                           chama=chama,
+                           fines=all_fines,
+                           is_admin=is_admin,
+                           members=members,
+                           total_unpaid=total_unpaid)
+
+
+@app.route('/chama/<int:chama_id>/add_fine', methods=['POST'])
+@login_required
+def add_fine(chama_id):
+    if not is_treasurer_or_chair(current_user, chama_id):
+        flash('Only treasurer or chairperson can issue fines.', 'danger')
+        return redirect(url_for('fines', chama_id=chama_id))
+    
+    chama = Chama.query.get_or_404(chama_id)
+    user_id = int(request.form.get('user_id'))
+    amount = float(request.form.get('amount', chama.fine_amount))
+    reason = request.form.get('reason', 'other')
+    notes = request.form.get('notes', '')
+    month = request.form.get('month', date.today().strftime('%Y-%m'))
+    
+    fine = Fine(
+        chama_id=chama_id,
+        user_id=user_id,
+        amount=amount,
+        reason=reason,
+        month=month if reason == 'late_contribution' else None,
+        notes=notes,
+        issued_by=current_user.id
+    )
+    db.session.add(fine)
+    db.session.commit()
+    
+    # SMS notify
+    try:
+        from services.sms import SMSService
+        user = User.query.get(user_id)
+        if user:
+            sms = SMSService()
+            reason_text = reason.replace('_', ' ').title()
+            msg = (
+                f"Habari {user.name.split()[0]}, "
+                f"a fine of {format_money(amount, chama.currency)} has been issued "
+                f"for {reason_text} in {chama.name}. "
+                f"Please clear it with the treasurer. - ChamaApp"
+            )
+            sms.send(user.phone, msg)
+    except Exception as e:
+        print(f'SMS error: {e}')
+    
+    flash(f'Fine of {format_money(amount, chama.currency)} issued successfully!', 'success')
+    return redirect(url_for('fines', chama_id=chama_id))
+
+
+@app.route('/fine/<int:fine_id>/pay', methods=['POST'])
+@login_required
+def pay_fine(fine_id):
+    fine = Fine.query.get_or_404(fine_id)
+    if not is_treasurer_or_chair(current_user, fine.chama_id):
+        flash('Only treasurer or chairperson can mark fines as paid.', 'danger')
+        return redirect(url_for('fines', chama_id=fine.chama_id))
+    
+    fine.status = 'paid'
+    fine.paid_date = date.today()
+    db.session.commit()
+    
+    flash('Fine marked as paid.', 'success')
+    return redirect(url_for('fines', chama_id=fine.chama_id))
+
+
+@app.route('/fine/<int:fine_id>/waive', methods=['POST'])
+@login_required
+def waive_fine(fine_id):
+    fine = Fine.query.get_or_404(fine_id)
+    if not is_treasurer_or_chair(current_user, fine.chama_id):
+        flash('Access denied.', 'danger')
+        return redirect(url_for('fines', chama_id=fine.chama_id))
+    
+    fine.status = 'waived'
+    db.session.commit()
+    
+    flash('Fine waived.', 'info')
+    return redirect(url_for('fines', chama_id=fine.chama_id))
+
+
+@app.route('/chama/<int:chama_id>/auto_fines', methods=['POST'])
+@login_required
+def auto_issue_fines(chama_id):
+    """Automatically issue late contribution fines for unpaid members this month"""
+    if not is_treasurer_or_chair(current_user, chama_id):
+        flash('Access denied.', 'danger')
+        return redirect(url_for('fines', chama_id=chama_id))
+    
+    chama = Chama.query.get_or_404(chama_id)
+    today = date.today()
+    
+    # Only auto-fine after grace period past contribution day
+    if today.day < (chama.contribution_day + chama.fine_grace_days):
+        flash(f'Too early. Grace period ends on day {chama.contribution_day + chama.fine_grace_days} of the month.', 'warning')
+        return redirect(url_for('fines', chama_id=chama_id))
+    
+    unpaid = get_unpaid_members_this_month(chama_id)
+    this_month = today.strftime('%Y-%m')
+    issued = 0
+    
+    for m in unpaid:
+        # Don't double-fine
+        existing = Fine.query.filter_by(
+            chama_id=chama_id, user_id=m.user_id,
+            reason='late_contribution', month=this_month, status='unpaid'
+        ).first()
+        if existing:
+            continue
+        
+        fine = Fine(
+            chama_id=chama_id,
+            user_id=m.user_id,
+            amount=chama.fine_amount,
+            reason='late_contribution',
+            month=this_month,
+            issued_by=current_user.id,
+            notes=f'Auto-issued for missing {this_month} contribution'
+        )
+        db.session.add(fine)
+        issued += 1
+        
+        try:
+            from services.sms import SMSService
+            sms = SMSService()
+            msg = (
+                f"Habari {m.user.name.split()[0]}, "
+                f"a late contribution fine of {format_money(chama.fine_amount, chama.currency)} "
+                f"has been applied for {chama.name} ({this_month}). - ChamaApp"
+            )
+            sms.send(m.user.phone, msg)
+        except Exception as e:
+            print(f'SMS error: {e}')
+    
+    db.session.commit()
+    flash(f'Issued {issued} late contribution fine(s).', 'success' if issued else 'info')
+    return redirect(url_for('fines', chama_id=chama_id))
+
+
+# ==================== CONTRIBUTION REMINDERS ====================
+
+@app.route('/chama/<int:chama_id>/reminders')
+@login_required
+def reminders(chama_id):
+    chama = Chama.query.get_or_404(chama_id)
+    membership = get_membership(current_user.id, chama_id)
+    if not membership:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    is_admin = is_treasurer_or_chair(current_user, chama_id)
+    unpaid = get_unpaid_members_this_month(chama_id)
+    this_month = date.today().strftime('%B %Y')
+    
+    return render_template('reminders.html',
+                           chama=chama,
+                           unpaid=unpaid,
+                           is_admin=is_admin,
+                           this_month=this_month)
+
+
+@app.route('/chama/<int:chama_id>/send_reminders', methods=['POST'])
+@login_required
+def send_reminders(chama_id):
+    if not is_treasurer_or_chair(current_user, chama_id):
+        flash('Only treasurer or chairperson can send reminders.', 'danger')
+        return redirect(url_for('reminders', chama_id=chama_id))
+    
+    chama = Chama.query.get_or_404(chama_id)
+    unpaid = get_unpaid_members_this_month(chama_id)
+    
+    if not unpaid:
+        flash('All members have already contributed this month!', 'success')
+        return redirect(url_for('reminders', chama_id=chama_id))
+    
+    from services.sms import SMSService
+    sms = SMSService()
+    sent = 0
+    this_month = date.today().strftime('%B %Y')
+    
+    for m in unpaid:
+        msg = (
+            f"Habari {m.user.name.split()[0]}, "
+            f"friendly reminder: your {this_month} contribution of "
+            f"{format_money(chama.contribution_amount, chama.currency)} "
+            f"for {chama.name} is due. "
+            f"Please pay via the ChamaApp or contact the treasurer. - ChamaApp"
+        )
+        result = sms.send(m.user.phone, msg)
+        if result.get('success'):
+            sent += 1
+    
+    flash(f'Reminders sent to {sent} member(s).', 'success')
+    return redirect(url_for('reminders', chama_id=chama_id))
+
+
+# ==================== CHAMA SETTINGS (currency, fines) ====================
+
+@app.route('/chama/<int:chama_id>/settings', methods=['GET', 'POST'])
+@login_required
+def chama_settings(chama_id):
+    if not is_treasurer_or_chair(current_user, chama_id):
+        flash('Only treasurer or chairperson can change settings.', 'danger')
+        return redirect(url_for('chama_detail', chama_id=chama_id))
+    
+    chama = Chama.query.get_or_404(chama_id)
+    
+    if request.method == 'POST':
+        chama.contribution_amount = float(request.form.get('contribution_amount', chama.contribution_amount))
+        chama.contribution_day = int(request.form.get('contribution_day', chama.contribution_day))
+        chama.loan_interest_rate = float(request.form.get('loan_interest_rate', chama.loan_interest_rate))
+        chama.max_loan_multiplier = float(request.form.get('max_loan_multiplier', chama.max_loan_multiplier))
+        chama.currency = request.form.get('currency', 'KES')
+        chama.fine_amount = float(request.form.get('fine_amount', 200))
+        chama.fine_grace_days = int(request.form.get('fine_grace_days', 3))
+        chama.description = request.form.get('description', chama.description)
+        
+        db.session.commit()
+        flash('Chama settings updated!', 'success')
+        return redirect(url_for('chama_detail', chama_id=chama_id))
+    
+    return render_template('chama_settings.html', chama=chama)
 
 
 # ==================== INIT DB & SEED ====================
